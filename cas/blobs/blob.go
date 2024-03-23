@@ -22,73 +22,10 @@ const (
 
 const MinChunkSize = 4096
 
-// SmallChunkSizeError is the error returned from Open if the
-// configuration has a ChunkSize less than MinChunkSize
-type SmallChunkSizeError struct {
-	Given uint32
-}
-
-var _ error = SmallChunkSizeError{}
-
-func (s SmallChunkSizeError) Error() string {
-	return fmt.Sprintf("[ErrBlob] ChunkSize is too small: %d < %d", s.Given, MinChunkSize)
-}
-
-// SmallFanoutError is the error returned from Open if the
-// configuration has a Fanout less than 2.
-type SmallFanoutError struct {
-	Given uint32
-}
-
-var _ error = SmallFanoutError{}
-
-func (s SmallFanoutError) Error() string {
-	return fmt.Sprintf("[ErrBlob] Fanout is too small: %d", s.Given)
-}
-
-type Manifest struct {
-	Type string
-	Root cas.Key
-	Size uint64
-	// Must be >= MinChunkSize.
-	ChunkSize uint32
-	//// Must be >= 2.
-	Fanout uint32
-}
-
-// EmptyManifest returns an empty manifest of the given type with the
-// default tuning parameters.
-func EmptyManifest(type_ string) *Manifest {
-	const kB = 1024
-	const MB = 1024 * kB
-
-	return &Manifest{
-		Type:      type_,
-		ChunkSize: 4 * MB,
-		Fanout:    64,
-	}
-}
-
 type Blob struct {
 	stash *stash.Stash
 	m     Manifest
 	depth uint8
-}
-
-func (blob *Blob) computeLevel(size uint64) uint8 {
-	// convert size (count of bytes) to offset of last byte
-	if size == 0 {
-		return 0
-	}
-
-	off := size - 1
-	idx := uint32(off / uint64(blob.m.ChunkSize))
-	var level uint8
-	for idx > 0 {
-		idx /= blob.m.Fanout
-		level++
-	}
-	return level
 }
 
 // Open returns a new Blob, using the given chunk store and manifest.
@@ -118,6 +55,160 @@ func Open(chunkStore store.Store, manifest *Manifest) (*Blob, error) {
 	}
 	blob.depth = blob.computeLevel(blob.m.Size)
 	return blob, nil
+}
+
+// Truncate adjusts the size of the blob. If the new size is less than
+// the old size, data past that point is lost. If the new size is
+// greater than the old size, the new part is full of zeroes.
+func (blob *Blob) Truncate(ctx context.Context, size uint64) error {
+	switch {
+	case size == 0:
+		// special case shrink to nothing
+		blob.m.Root = cas.Empty
+		blob.m.Size = 0
+		blob.stash.Clear()
+
+	case size < blob.m.Size:
+		// shrink
+
+		// i really am starting to hate the idea of file offsets being
+		// int64's, but can't fight all the windmills at once.
+		if size > math.MaxInt64 {
+			return errors.New("cannot discard past 63-bit file size")
+		}
+
+		// we know size>0 from above
+		off := size - 1
+		gidx := uint32(off / uint64(blob.m.ChunkSize))
+		lidxs := localChunkIndexes(blob.m.Fanout, gidx)
+		err := blob.shrink(ctx, uint8(len(lidxs)))
+		if err != nil {
+			return err
+		}
+
+		// we don't need to always cow here (if everything is
+		// perfectly aligned / already zero), but it's a rare enough
+		// case that let's not care for now
+		//
+		// TODO this makes a tight loop on Open and Save wasteful
+
+		{
+			// TODO clone all the way down to be able to trim leaf chunk,
+			// abusing lookupForWrite for now
+
+			// we know size > 0 from above
+			_, err := blob.lookupForWrite(ctx, size-1)
+			if err != nil {
+				return err
+			}
+		}
+
+		// now zero-fill on the right; guaranteed cow by the above kludge
+		key := blob.m.Root
+		if debugTruncate {
+			if !key.IsPrivate() {
+				panic(fmt.Errorf("Truncate root is not private: %v", key))
+			}
+		}
+		for level := blob.depth; level > 0; level-- {
+			chunk, err := blob.stash.Get(ctx, key, blob.m.Type, level)
+			if err != nil {
+				return err
+			}
+			err = blob.discardAfter(ctx, chunk, lidxs[level-1]+1, level)
+			if err != nil {
+				return err
+			}
+			keyoff := int64(lidxs[level-1]) * cas.KeySize
+			keybuf := chunk.Buf[keyoff : keyoff+cas.KeySize]
+			key = cas.NewKeyPrivate(keybuf)
+			if debugTruncate {
+				if !key.IsPrivate() {
+					panic(fmt.Errorf("Truncate key at level %d not private: %v", level, key))
+				}
+			}
+		}
+
+		// and finally the leaf chunk
+		chunk, err := blob.stash.Get(ctx, key, blob.m.Type, 0)
+		if err != nil {
+			return err
+		}
+		{
+			// TODO is there anything to clear here; beware modulo wraparound
+
+			// size is also the offset of the next byte
+			loff := uint32(size % uint64(blob.m.ChunkSize))
+			zeroSlice(chunk.Buf[loff:])
+		}
+
+		// TODO what's the right time to adjust size, wrt errors
+		blob.m.Size = size
+
+		// TODO unit tests that checks we don't leak chunks?
+
+	case size > blob.m.Size:
+		// grow
+		off := size - 1
+		gidx := uint32(off / uint64(blob.m.ChunkSize))
+		lidxs := localChunkIndexes(blob.m.Fanout, gidx)
+		err := blob.grow(ctx, uint8(len(lidxs)))
+		if err != nil {
+			return err
+		}
+		blob.m.Size = size
+	}
+	return nil
+}
+
+// Save persists the Blob into the Store and returns a new Manifest
+// that can be passed to Open later.
+func (blob *Blob) Save(ctx context.Context) (*Manifest, error) {
+	// make sure the tree is optimal depth, as later we rely purely on
+	// size to compute depth; this might happen because of errors on a
+	// write/truncate path
+	level := blob.computeLevel(blob.m.Size)
+	switch {
+	case blob.depth > level:
+		err := blob.shrink(ctx, level)
+		if err != nil {
+			return nil, err
+		}
+	case blob.depth < level:
+		err := blob.grow(ctx, level)
+		if err != nil {
+			return nil, err
+		}
+	}
+	k, err := blob.saveChunk(ctx, blob.m.Root, blob.depth)
+	if err != nil {
+		return nil, err
+	}
+	blob.m.Root = k
+	// make a copy to return
+	m := blob.m
+	return &m, nil
+}
+
+// Size returns the current byte size of the Blob.
+func (blob *Blob) Size() uint64 {
+	return blob.m.Size
+}
+
+func (blob *Blob) computeLevel(size uint64) uint8 {
+	// convert size (count of bytes) to offset of last byte
+	if size == 0 {
+		return 0
+	}
+
+	off := size - 1
+	idx := uint32(off / uint64(blob.m.ChunkSize))
+	var level uint8
+	for idx > 0 {
+		idx /= blob.m.Fanout
+		level++
+	}
+	return level
 }
 
 // Given a global chunk index, generate a list of local chunk indexes.
@@ -246,13 +337,11 @@ func (blob *Blob) lookupForWrite(ctx context.Context, off uint64) (*chunks.Chunk
 			idx = lidxs[level-1]
 		}
 
-		keyoff := int64(idx) * cas.KeySize
+		keyOffset := int64(idx) * cas.KeySize
 		{
-			k := cas.NewKeyPrivate(parentChunk.Buf[keyoff : keyoff+cas.KeySize])
-			//ks := k.String()
-			//print(ks)
+			k := cas.NewKeyPrivate(parentChunk.Buf[keyOffset : keyOffset+cas.KeySize])
 			if k.IsReserved() {
-				return nil, fmt.Errorf("invalid stored key: key @%d in %v is %v", keyoff, ptrKey, parentChunk.Buf[keyoff:keyoff+cas.KeySize])
+				return nil, fmt.Errorf("invalid stored key: key @%d in %v is %v", keyOffset, ptrKey, parentChunk.Buf[keyOffset:keyOffset+cas.KeySize])
 			}
 			ptrKey = k
 		}
@@ -271,7 +360,7 @@ func (blob *Blob) lookupForWrite(ctx context.Context, off uint64) (*chunks.Chunk
 		}
 
 		// update the key in parent
-		n := copy(parentChunk.Buf[keyoff:keyoff+cas.KeySize], ptrKey.Bytes())
+		n := copy(parentChunk.Buf[keyOffset:keyOffset+cas.KeySize], ptrKey.Bytes())
 		if debugLookup {
 			if n != cas.KeySize {
 				panic(fmt.Errorf("lookupForWrite copied only %d of the key", n))
@@ -369,110 +458,6 @@ func zeroSlice(p []byte) {
 	}
 }
 
-// Truncate adjusts the size of the blob. If the new size is less than
-// the old size, data past that point is lost. If the new size is
-// greater than the old size, the new part is full of zeroes.
-func (blob *Blob) Truncate(ctx context.Context, size uint64) error {
-	switch {
-	case size == 0:
-		// special case shrink to nothing
-		blob.m.Root = cas.Empty
-		blob.m.Size = 0
-		blob.stash.Clear()
-
-	case size < blob.m.Size:
-		// shrink
-
-		// i really am starting to hate the idea of file offsets being
-		// int64's, but can't fight all the windmills at once.
-		if size > math.MaxInt64 {
-			return errors.New("cannot discard past 63-bit file size")
-		}
-
-		// we know size>0 from above
-		off := size - 1
-		gidx := uint32(off / uint64(blob.m.ChunkSize))
-		lidxs := localChunkIndexes(blob.m.Fanout, gidx)
-		err := blob.shrink(ctx, uint8(len(lidxs)))
-		if err != nil {
-			return err
-		}
-
-		// we don't need to always cow here (if everything is
-		// perfectly aligned / already zero), but it's a rare enough
-		// case that let's not care for now
-		//
-		// TODO this makes a tight loop on Open and Save wasteful
-
-		{
-			// TODO clone all the way down to be able to trim leaf chunk,
-			// abusing lookupForWrite for now
-
-			// we know size > 0 from above
-			_, err := blob.lookupForWrite(ctx, size-1)
-			if err != nil {
-				return err
-			}
-		}
-
-		// now zero-fill on the right; guaranteed cow by the above kludge
-		key := blob.m.Root
-		if debugTruncate {
-			if !key.IsPrivate() {
-				panic(fmt.Errorf("Truncate root is not private: %v", key))
-			}
-		}
-		for level := blob.depth; level > 0; level-- {
-			chunk, err := blob.stash.Get(ctx, key, blob.m.Type, level)
-			if err != nil {
-				return err
-			}
-			err = blob.discardAfter(ctx, chunk, lidxs[level-1]+1, level)
-			if err != nil {
-				return err
-			}
-			keyoff := int64(lidxs[level-1]) * cas.KeySize
-			keybuf := chunk.Buf[keyoff : keyoff+cas.KeySize]
-			key = cas.NewKeyPrivate(keybuf)
-			if debugTruncate {
-				if !key.IsPrivate() {
-					panic(fmt.Errorf("Truncate key at level %d not private: %v", level, key))
-				}
-			}
-		}
-
-		// and finally the leaf chunk
-		chunk, err := blob.stash.Get(ctx, key, blob.m.Type, 0)
-		if err != nil {
-			return err
-		}
-		{
-			// TODO is there anything to clear here; beware modulo wraparound
-
-			// size is also the offset of the next byte
-			loff := uint32(size % uint64(blob.m.ChunkSize))
-			zeroSlice(chunk.Buf[loff:])
-		}
-
-		// TODO what's the right time to adjust size, wrt errors
-		blob.m.Size = size
-
-		// TODO unit tests that checks we don't leak chunks?
-
-	case size > blob.m.Size:
-		// grow
-		off := size - 1
-		gidx := uint32(off / uint64(blob.m.ChunkSize))
-		lidxs := localChunkIndexes(blob.m.Fanout, gidx)
-		err := blob.grow(ctx, uint8(len(lidxs)))
-		if err != nil {
-			return err
-		}
-		blob.m.Size = size
-	}
-	return nil
-}
-
 func (blob *Blob) saveChunk(ctx context.Context, key cas.Key, level uint8) (cas.Key, error) {
 	if !key.IsPrivate() {
 		// already saved
@@ -501,38 +486,4 @@ func (blob *Blob) saveChunk(ctx context.Context, key cas.Key, level uint8) (cas.
 
 	chunk.Buf = trim(chunk.Buf)
 	return blob.stash.Save(ctx, key)
-}
-
-// Save persists the Blob into the Store and returns a new Manifest
-// that can be passed to Open later.
-func (blob *Blob) Save(ctx context.Context) (*Manifest, error) {
-	// make sure the tree is optimal depth, as later we rely purely on
-	// size to compute depth; this might happen because of errors on a
-	// write/truncate path
-	level := blob.computeLevel(blob.m.Size)
-	switch {
-	case blob.depth > level:
-		err := blob.shrink(ctx, level)
-		if err != nil {
-			return nil, err
-		}
-	case blob.depth < level:
-		err := blob.grow(ctx, level)
-		if err != nil {
-			return nil, err
-		}
-	}
-	k, err := blob.saveChunk(ctx, blob.m.Root, blob.depth)
-	if err != nil {
-		return nil, err
-	}
-	blob.m.Root = k
-	// make a copy to return
-	m := blob.m
-	return &m, nil
-}
-
-// Size returns the current byte size of the Blob.
-func (blob *Blob) Size() uint64 {
-	return blob.m.Size
 }
