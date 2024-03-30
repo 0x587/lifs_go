@@ -6,7 +6,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"lifs_go/cas/blobs"
 	"lifs_go/cas/store"
-	"lifs_go/cas/store/mem"
 	"syscall"
 )
 
@@ -14,44 +13,78 @@ type Volume struct {
 	fs.Inode
 	s        store.Store
 	mkv      map[string]*blobs.Manifest
-	files    map[string]*File
 	children map[string]*fs.Inode
 }
 
-func (v *Volume) getFile(ctx context.Context, name string, m *blobs.Manifest) *File {
-	file, ok := v.files[name]
-	if ok {
-		return file
-	}
-	file = NewFile(v.s, m)
-	v.files[name] = file
-	return file
-}
+//func (v *Volume) getDir(ctx context.Context, name string, m *blobs.Manifest) *Volume {
+//	dir := New(v.s)
+//
+//	return dir
+//}
+//
+//func (v *Volume) getFile(ctx context.Context, name string, m *blobs.Manifest) *File {
+//	file, ok := v.files[name]
+//	if ok {
+//		return file
+//	}
+//	file = NewFile(v.s, m)
+//	v.files[name] = file
+//	return file
+//}
 
-func (v *Volume) getChild(ctx context.Context, name string, m *blobs.Manifest) *fs.Inode {
+func (v *Volume) getChild(ctx context.Context, name string, f func() fs.InodeEmbedder) *fs.Inode {
 	node, ok := v.children[name]
 	if ok {
 		return node
 	}
-	f := v.getFile(ctx, name, m)
-	node = v.NewInode(ctx, f, fs.StableAttr{Mode: fuse.S_IFREG})
+	if f == nil {
+		panic("try to get a not exist child but not provide make function.")
+	}
+	ie := f()
+	var attr uint32
+	switch ie.(type) {
+	case *Volume:
+		attr = fuse.S_IFDIR
+	case *File:
+		attr = fuse.S_IFREG
+	}
+	node = v.NewInode(ctx, f(), fs.StableAttr{Mode: attr})
 	v.children[name] = node
 	return node
 }
 
-func (v *Volume) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (
+func (v *Volume) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Mode = fuse.S_IFDIR
+	return syscall.F_OK
+}
+
+var _ fs.NodeGetattrer = (*Volume)(nil)
+
+func (v *Volume) Create(ctx context.Context, name string, flags uint32, mode uint32, _ *fuse.EntryOut) (
 	node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	m := blobs.EmptyManifest("file")
-	v.mkv[name] = m
-	return v.getChild(ctx, name, m), v.getFile(ctx, name, m), flags, syscall.F_OK
+	inode := v.getChild(ctx, name, func() fs.InodeEmbedder {
+		m := blobs.EmptyManifest("file")
+		v.mkv[name] = m
+		return NewFile(v.s, m)
+	})
+	return inode, inode.Operations(), flags, syscall.F_OK
 }
 
 var _ fs.NodeCreater = (*Volume)(nil)
 
+func (v *Volume) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (
+	*fs.Inode, syscall.Errno) {
+	return v.getChild(ctx, name, func() fs.InodeEmbedder {
+		return New(v.s)
+	}), syscall.F_OK
+}
+
+var _ fs.NodeMkdirer = (*Volume)(nil)
+
 func (v *Volume) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	entries := make([]fuse.DirEntry, 0)
-	for name, _ := range v.mkv {
-		entries = append(entries, fuse.DirEntry{Mode: fuse.S_IFREG, Name: name})
+	for name, _ := range v.children {
+		entries = append(entries, fuse.DirEntry{Name: name})
 	}
 	res := fs.NewListDirStream(entries)
 	return res, syscall.F_OK
@@ -59,22 +92,22 @@ func (v *Volume) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 var _ fs.NodeReaddirer = (*Volume)(nil)
 
-func (v *Volume) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+func (v *Volume) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
+	*fs.Inode, syscall.Errno) {
 	// for file
-	m, ok := v.mkv[name]
+	_, ok := v.children[name]
 	if ok {
-		return v.getChild(ctx, name, m), syscall.F_OK
+		return v.getChild(ctx, name, nil), syscall.F_OK
 	}
 	return nil, syscall.ENOENT
 }
 
 var _ fs.NodeLookuper = (*Volume)(nil)
 
-func New() *Volume {
+func New(store store.Store) *Volume {
 	return &Volume{
-		s:        &mem.Mem{},
+		s:        store,
 		mkv:      make(map[string]*blobs.Manifest),
-		files:    make(map[string]*File),
 		children: make(map[string]*fs.Inode),
 	}
 }
