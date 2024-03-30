@@ -305,10 +305,10 @@ func (blob *Blob) lookup(ctx context.Context, off uint64) (*chunks.Chunk, error)
 // lookupForWrite fetches the data chunk for the given offset and
 // ensures it is Private and reinflated, and thus writable.
 func (blob *Blob) lookupForWrite(ctx context.Context, off uint64) (*chunks.Chunk, error) {
-	gidx := uint32(off / uint64(blob.m.ChunkSize))
-	lidxs := localChunkIndexes(blob.m.Fanout, gidx)
+	globalIdx := uint32(off / uint64(blob.m.ChunkSize))
+	localIds := localChunkIndexes(blob.m.Fanout, globalIdx)
 
-	err := blob.grow(ctx, uint8(len(lidxs)))
+	err := blob.grow(ctx, uint8(len(localIds)))
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +333,8 @@ func (blob *Blob) lookupForWrite(ctx context.Context, off uint64) (*chunks.Chunk
 	for ; level > 0; level-- {
 		// follow pointer chunks
 		var idx uint32
-		if int(level)-1 < len(lidxs) {
-			idx = lidxs[level-1]
+		if int(level)-1 < len(localIds) {
+			idx = localIds[level-1]
 		}
 
 		keyOffset := int64(idx) * cas.KeySize
