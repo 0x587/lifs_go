@@ -398,7 +398,7 @@ func TestWriteAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error from Save: %v", err)
 	}
-	if g, e := saved.Root.String(), "8962e9dc90ff89ca16494cd970b0ccac1b0441a3733d93f729bac882fdc6785389d1a4156abd980dc3c5b74b7992088f7002d7c16ceb2771cd050777dcac3b08"; g != e {
+	if g, e := saved.Root.String(), "7c85585d46153d26c4b3ccdc28dc776ce2b7a6350dba2c7ca97b7f315f600caef71b8e9b0b781d539e65cacfa8bdba05f2532cbf0722813bc2e83dae689b5d4d"; g != e {
 		t.Errorf("unexpected key: %q != %q", g, e)
 	}
 	if g, e := saved.Size, uint64(len(GREETING)); g != e {
@@ -434,7 +434,7 @@ func TestWriteAndSaveLarge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error from Save: %v", err)
 	}
-	if g, e := saved.Root.String(), "04c4f4631f49224a4de3e18064fb2746de2b78dff501d718b27f6ae8e2c88e414812f6b5dcd0f6887e817384329c5bfe46c628fa3be259b613e9e74fb249c700"; g != e {
+	if g, e := saved.Root.String(), "c66d998cd85de065f9bd9a048bf3a985350cf8d34f389e2020081b0ad81e14a6281d25cd19b7dfec6f0661ec4603cccddfb43dde98d6515d95bded8fa51aa40f"; g != e {
 		t.Errorf("unexpected key: %q != %q", g, e)
 	}
 	if g, e := saved.Size, uint64(chunkSize+chunkSize); g != e {

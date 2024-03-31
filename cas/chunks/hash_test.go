@@ -25,7 +25,7 @@ func TestHashSomeZeroes(t *testing.T) {
 		Buf:   []byte{0x00, 0x00, 0x00},
 	}
 	k := chunks.Hash(c)
-	if g, e := k.String(), "d65b5bf2caf92d88848934da742375621f0f4b2ed6aa03a4256c30a16953467ea984a18bb925d6195e1fe5518eaf906e56142ceba66e1c6606b123eb44d59d40"; g != e {
+	if g, e := k.String(), "b1de301ec218d8649586a4e474e4c44d26b8dbc3bdcb7ea24fbf0634956469c0e17008af3186c4a4daf566e26b865a00cd3cc0fc34bcc736b569ccf5dfc59acf"; g != e {
 		t.Errorf("wrong key for some zero bytes: %v != %v", g, e)
 	}
 }

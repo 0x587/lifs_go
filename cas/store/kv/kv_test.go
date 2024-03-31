@@ -22,7 +22,7 @@ func TestBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kvmem.Put fail %v\n", err)
 	}
-	if ks, ts := key.String(), "277f5df2e35f643bac0a5bff3e3a2d733ae2b78c77ac1f3fff4601f080c1aaf4617879da0262fe08a6925eeaeafe9463fa6927f2dc788c5bbf3e898860986f17"; ks != ts {
+	if ks, ts := key.String(), "4077d28a47aab1811f78b740bef641ebe8cbabaefa142f37112d42d8868c2230d7d42a9566142b14ef99a6bc73bd36ebe696490746849f6791827fd4316ee756"; ks != ts {
 		t.Errorf("bad key %s!=%s", ks, ts)
 	}
 	c, err := target.Get(ctx, key, chunk.Type, chunk.Level)
