@@ -1,25 +1,100 @@
 package main
 
-import "fmt"
+import (
+	"crypto/tls"
+	"errors"
+	ftpserver "github.com/fclairamb/ftpserverlib"
+	log "github.com/fclairamb/go-log"
+	gkwrap "github.com/fclairamb/go-log/gokit"
+	"github.com/spf13/afero"
+	"sync"
+)
 
-func localChunkIndexes(fanout uint32, chunk uint32) []uint32 {
-	// 6 is a good guess for max level of pointer chunks;
-	// 4MiB chunksize, uint32 chunk index -> 15PiB of data.
-	// overflow just means an allocation.
-	index := make([]uint32, 0, 6)
+type Driver struct {
+	logger          log.Logger
+	nbClients       uint32
+	nbClientsSync   sync.Mutex
+	zeroClientEvent chan error
+	tlsOnce         sync.Once
+	tlsConfig       *tls.Config
+	tlsError        error
+}
 
-	for chunk > 0 {
-		index = append(index, chunk%fanout)
-		chunk /= fanout
+func (d *Driver) GetSettings() (*ftpserver.Settings, error) {
+	return &ftpserver.Settings{
+		PassiveTransferPortRange: &ftpserver.PortRange{
+			Start: 2122,
+			End:   2130,
+		},
+	}, nil
+}
+
+func (d *Driver) ClientConnected(cc ftpserver.ClientContext) (string, error) {
+	d.nbClientsSync.Lock()
+	defer d.nbClientsSync.Unlock()
+	d.nbClients++
+	d.logger.Info(
+		"Client connected",
+		"clientId", cc.ID(),
+		"remoteAddr", cc.RemoteAddr(),
+		"nbClients", d.nbClients,
+	)
+	return "ftpserver", nil
+}
+
+func (d *Driver) ClientDisconnected(cc ftpserver.ClientContext) {
+	d.nbClientsSync.Lock()
+	defer d.nbClientsSync.Unlock()
+
+	d.nbClients--
+
+	d.logger.Info(
+		"Client disconnected",
+		"clientId", cc.ID(),
+		"remoteAddr", cc.RemoteAddr(),
+		"nbClients", d.nbClients,
+	)
+	d.considerEnd()
+}
+
+func (d *Driver) considerEnd() {
+	if d.nbClients == 0 && d.zeroClientEvent != nil {
+		d.zeroClientEvent <- nil
+		close(d.zeroClientEvent)
 	}
-	return index
+}
+
+// The ClientDriver is the internal structure used for handling the client. At this stage it's limited to the afero.Fs
+type ClientDriver struct {
+	afero.Fs
+}
+
+func (d *Driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpserver.ClientDriver, error) {
+	accFs := afero.NewBasePathFs(afero.NewOsFs(), "/Users/shawn/code/lifs_go")
+	return accFs, nil
+}
+
+func (d *Driver) GetTLSConfig() (*tls.Config, error) {
+	return nil, errors.New("not enabled")
+}
+
+// NewServer creates a server instance
+func NewServer(logger log.Logger) (ftpserver.MainDriver, error) {
+	return &Driver{
+		logger: logger,
+	}, nil
 }
 
 func main() {
-	//kv_ := kvmem.NewKvMem()
-	//v, _ := volume.NewVolume("/home/szm/test-tmp", kv_)
-	//_ = v.Init()
-	//_ = v.Scan()
-	//fmt.Println(v)
-	fmt.Println([]int{1, 2, 3}[1:1])
+	logger := gkwrap.New()
+
+	driver, err := NewServer(logger)
+	if err != nil {
+		logger.Error("Problem creating server", "err", err)
+	}
+	ftpServer := ftpserver.NewFtpServer(driver)
+
+	if err := ftpServer.ListenAndServe(); err != nil {
+		logger.Error("Problem listening", "err", err)
+	}
 }

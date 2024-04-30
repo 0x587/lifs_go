@@ -3,8 +3,8 @@ package fuse_test
 import (
 	"bytes"
 	"io"
+	"lifs_go/access/fuse"
 	"lifs_go/cas/store/mem"
-	"lifs_go/fs/fuse"
 	"os"
 	"path"
 	"testing"

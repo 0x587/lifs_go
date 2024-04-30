@@ -1,11 +1,11 @@
 package fuse
 
 import (
-	fs2 "github.com/hanwen/go-fuse/v2/fs"
-	fuse2 "github.com/hanwen/go-fuse/v2/fuse"
+	gofs "github.com/hanwen/go-fuse/v2/fs"
+	gofuse "github.com/hanwen/go-fuse/v2/fuse"
+	"lifs_go/access"
 	"lifs_go/cas/blobs"
 	"lifs_go/cas/store"
-	"lifs_go/fs"
 )
 
 type Impl struct {
@@ -13,11 +13,11 @@ type Impl struct {
 }
 
 func (i *Impl) Mount(dir string) (func(), error) {
-	opts := fs2.Options{MountOptions: fuse2.MountOptions{Debug: false}}
-	c := make(chan *fuse2.Server, 1)
+	opts := gofs.Options{MountOptions: gofuse.MountOptions{Debug: false}}
+	c := make(chan *gofuse.Server, 1)
 	e := make(chan error, 1)
 	go func() {
-		server, err := fs2.Mount(dir, i.volume, &opts)
+		server, err := gofs.Mount(dir, i.volume, &opts)
 		if err != nil {
 			e <- err
 			return
@@ -39,11 +39,11 @@ func open(store store.IF) *Volume {
 	return &Volume{
 		s:        store,
 		mkv:      make(map[string]*blobs.Manifest),
-		children: make(map[string]*fs2.Inode),
+		children: make(map[string]*gofs.Inode),
 	}
 }
 
-func New(store store.IF) fs.IF {
+func New(store store.IF) access.IF {
 	return &Impl{
 		volume: open(store),
 	}
