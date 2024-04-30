@@ -1,4 +1,4 @@
-package fs
+package fuse
 
 import (
 	"context"
@@ -11,26 +11,10 @@ import (
 
 type Volume struct {
 	fs.Inode
-	s        store.Store
+	s        store.IF
 	mkv      map[string]*blobs.Manifest
 	children map[string]*fs.Inode
 }
-
-//func (v *Volume) getDir(ctx context.Context, name string, m *blobs.Manifest) *Volume {
-//	dir := New(v.s)
-//
-//	return dir
-//}
-//
-//func (v *Volume) getFile(ctx context.Context, name string, m *blobs.Manifest) *File {
-//	file, ok := v.files[name]
-//	if ok {
-//		return file
-//	}
-//	file = NewFile(v.s, m)
-//	v.files[name] = file
-//	return file
-//}
 
 func (v *Volume) getChild(ctx context.Context, name string, f func() fs.InodeEmbedder) *fs.Inode {
 	node, ok := v.children[name]
@@ -65,7 +49,7 @@ func (v *Volume) Create(ctx context.Context, name string, flags uint32, mode uin
 	inode := v.getChild(ctx, name, func() fs.InodeEmbedder {
 		m := blobs.EmptyManifest("file")
 		v.mkv[name] = m
-		return NewFile(v.s, m)
+		return newFile(v.s, m)
 	})
 	return inode, inode.Operations(), flags, syscall.F_OK
 }
@@ -75,7 +59,7 @@ var _ fs.NodeCreater = (*Volume)(nil)
 func (v *Volume) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (
 	*fs.Inode, syscall.Errno) {
 	return v.getChild(ctx, name, func() fs.InodeEmbedder {
-		return New(v.s)
+		return open(v.s)
 	}), syscall.F_OK
 }
 
@@ -103,11 +87,3 @@ func (v *Volume) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 }
 
 var _ fs.NodeLookuper = (*Volume)(nil)
-
-func New(store store.Store) *Volume {
-	return &Volume{
-		s:        store,
-		mkv:      make(map[string]*blobs.Manifest),
-		children: make(map[string]*fs.Inode),
-	}
-}

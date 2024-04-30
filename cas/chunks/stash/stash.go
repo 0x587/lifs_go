@@ -8,10 +8,10 @@ import (
 	"lifs_go/idpool"
 )
 
-// Stash is a proxy for a chunks.Store, but it keeps Private Keys
+// Stash is a proxy for a Store, but it keeps Private Keys
 // local, only saving them to the Store when Save is called.
 type Stash struct {
-	chunks store.Store
+	chunks store.IF
 	ids    idpool.Pool
 	local  map[uint64]*chunks.Chunk
 }
@@ -125,7 +125,7 @@ func (s *Stash) Clear() {
 }
 
 // New creates a new Stash.
-func New(bs store.Store) *Stash {
+func New(bs store.IF) *Stash {
 	s := &Stash{
 		chunks: bs,
 		local:  make(map[uint64]*chunks.Chunk),

@@ -1,17 +1,17 @@
-package kvmem_test
+package mem_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"lifs_go/kv"
-	"lifs_go/kv/kvmem"
+	"lifs_go/kv/mem"
 	"strings"
 	"testing"
 )
 
-func NewTestTarget() kv.KV {
-	return kvmem.NewKvMem()
+func NewTestTarget() kv.IF {
+	return mem.New()
 }
 
 func TestPut(t *testing.T) {

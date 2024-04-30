@@ -26,7 +26,7 @@ type Metadata struct {
 
 type Volume struct {
 	RootPath string
-	kv       kv.KV
+	kv       kv.IF
 	init     bool
 }
 
@@ -72,6 +72,6 @@ func (v *Volume) Scan() error {
 	return nil
 }
 
-func NewVolume(root string, kv kv.KV) (*Volume, error) {
+func NewVolume(root string, kv kv.IF) (*Volume, error) {
 	return &Volume{root, kv, false}, nil
 }

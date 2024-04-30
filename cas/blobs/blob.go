@@ -36,7 +36,7 @@ type Blob struct {
 // A Blob need not exist; passing in a Manifest with an Empty Root
 // gives a Blob with zero contents. However, all the fields must be
 // set to valid values.
-func Open(chunkStore store.Store, manifest *Manifest) (*Blob, error) {
+func Open(chunkStore store.IF, manifest *Manifest) (*Blob, error) {
 	// make a copy so caller can't mutate it
 	m := *manifest
 	if m.Type == "" {

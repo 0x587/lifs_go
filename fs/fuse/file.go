@@ -1,4 +1,4 @@
-package fs
+package fuse
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 type File struct {
 	fs.Inode
-	s    store.Store
+	s    store.IF
 	blob *blobs.Blob
 }
 
@@ -58,7 +58,7 @@ func (f *File) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResul
 
 var _ fs.FileReader = (*File)(nil)
 
-func NewFile(s store.Store, m *blobs.Manifest) *File {
+func newFile(s store.IF, m *blobs.Manifest) *File {
 	b, _ := blobs.Open(s, m)
 	return &File{
 		s:    s,

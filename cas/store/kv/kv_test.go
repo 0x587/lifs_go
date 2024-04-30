@@ -5,12 +5,12 @@ import (
 	"lifs_go/cas/chunks"
 	"lifs_go/cas/store"
 	"lifs_go/cas/store/kv"
-	kv_ "lifs_go/kv/kvmem"
+	kvmem "lifs_go/kv/mem"
 	"testing"
 )
 
-func NewTestTarget() store.Store {
-	return kv.NewStoreKV(kv_.NewKvMem())
+func NewTestTarget() store.IF {
+	return kv.New(kvmem.New())
 }
 
 func TestBasic(t *testing.T) {

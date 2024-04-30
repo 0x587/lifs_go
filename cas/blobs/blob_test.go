@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func emptyBlob(t testing.TB, chunkStore store.Store) *blobs.Blob {
+func emptyBlob(t testing.TB, chunkStore store.IF) *blobs.Blob {
 	blob, err := blobs.Open(
 		chunkStore,
 		blobs.EmptyManifest("type_empty"),
@@ -24,7 +24,7 @@ func emptyBlob(t testing.TB, chunkStore store.Store) *blobs.Blob {
 }
 
 func TestOpenNoType(t *testing.T) {
-	_, err := blobs.Open(&mem.Mem{}, &blobs.Manifest{
+	_, err := blobs.Open(mem.New(), &blobs.Manifest{
 		// no Type
 		ChunkSize: blobs.MinChunkSize,
 		Fanout:    2,
@@ -35,7 +35,7 @@ func TestOpenNoType(t *testing.T) {
 }
 
 func TestEmptyRead(t *testing.T) {
-	blob := emptyBlob(t, &mem.Mem{})
+	blob := emptyBlob(t, mem.New())
 	buf := make([]byte, 10)
 	ctx := context.Background()
 	n, err := blob.IO(ctx).ReadAt(buf, 3)
@@ -50,7 +50,7 @@ func TestEmptyRead(t *testing.T) {
 func TestSparseRead(t *testing.T) {
 	const chunkSize = 4096
 	blob, err := blobs.Open(
-		&mem.Mem{},
+		mem.New(),
 		&blobs.Manifest{
 			Type:      "footype",
 			Size:      100,
@@ -73,7 +73,7 @@ func TestSparseRead(t *testing.T) {
 }
 
 func TestEmptySave(t *testing.T) {
-	blob := emptyBlob(t, &mem.Mem{})
+	blob := emptyBlob(t, mem.New())
 	ctx := context.Background()
 	saved, err := blob.Save(ctx)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestEmptySave(t *testing.T) {
 }
 
 func TestEmptyDirtySave(t *testing.T) {
-	blob := emptyBlob(t, &mem.Mem{})
+	blob := emptyBlob(t, mem.New())
 	ctx := context.Background()
 	n, err := blob.IO(ctx).WriteAt([]byte{0x00}, 0)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestEmptyDirtySave(t *testing.T) {
 var GREETING = []byte("hello, world\n")
 
 func TestWriteAndRead(t *testing.T) {
-	blob := emptyBlob(t, &mem.Mem{})
+	blob := emptyBlob(t, mem.New())
 	ctx := context.Background()
 	n, err := blob.IO(ctx).WriteAt(GREETING, 0)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestWriteAndRead(t *testing.T) {
 }
 
 func TestWriteSaveAndRead(t *testing.T) {
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	ctx := context.Background()
 	var saved *blobs.Manifest
 	{
@@ -191,7 +191,7 @@ func TestWriteSaveAndRead(t *testing.T) {
 func TestWriteSaveLoopAndRead(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 2
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -250,7 +250,7 @@ func TestWriteSaveLoopAndRead(t *testing.T) {
 func TestWriteSaveAndReadLarge(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 2
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	// just enough to span multiple chunks
 	greeting := bytes.Repeat(GREETING, chunkSize/len(GREETING)+1)
 
@@ -304,7 +304,7 @@ func TestWriteSaveAndReadLarge(t *testing.T) {
 
 func TestWriteSparse(t *testing.T) {
 	const chunkSize = 4096
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -344,7 +344,7 @@ func TestWriteSparse(t *testing.T) {
 
 func TestWriteSparseBoundary(t *testing.T) {
 	const chunkSize = 4096
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -382,7 +382,7 @@ func TestWriteSparseBoundary(t *testing.T) {
 }
 
 func TestWriteAndSave(t *testing.T) {
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob := emptyBlob(t, chunkStore)
 
 	ctx := context.Background()
@@ -409,7 +409,7 @@ func TestWriteAndSave(t *testing.T) {
 func TestWriteAndSaveLarge(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 64
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -445,7 +445,7 @@ func TestWriteAndSaveLarge(t *testing.T) {
 func TestWriteTruncateZero(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 64
-	blob, err := blobs.Open(&mem.Mem{}, &blobs.Manifest{
+	blob, err := blobs.Open(mem.New(), &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
 		Fanout:    fanout,
@@ -495,7 +495,7 @@ func TestWriteTruncateZero(t *testing.T) {
 func TestWriteTruncateShrink(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 64
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -577,7 +577,7 @@ func TestWriteTruncateShrink(t *testing.T) {
 func TestWriteTruncateGrow(t *testing.T) {
 	const chunkSize = 4096
 	const fanout = 64
-	chunkStore := &mem.Mem{}
+	chunkStore := mem.New()
 	blob, err := blobs.Open(chunkStore, &blobs.Manifest{
 		Type:      "footype",
 		ChunkSize: chunkSize,
@@ -665,7 +665,7 @@ func TestWriteTruncateGrow(t *testing.T) {
 }
 
 func BenchmarkWriteSmall(b *testing.B) {
-	blob := emptyBlob(b, &mem.Mem{})
+	blob := emptyBlob(b, mem.New())
 	ctx := context.Background()
 	bio := blob.IO(ctx)
 
@@ -685,7 +685,7 @@ func BenchmarkWriteSmall(b *testing.B) {
 
 func BenchmarkWriteBig(b *testing.B) {
 	body := bytes.Repeat(GREETING, 1000000)
-	blob := emptyBlob(b, &mem.Mem{})
+	blob := emptyBlob(b, mem.New())
 	ctx := context.Background()
 	bio := blob.IO(ctx)
 

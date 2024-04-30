@@ -1,4 +1,4 @@
-package kvfile
+package file
 
 import (
 	"context"
@@ -8,17 +8,15 @@ import (
 	"path/filepath"
 )
 
-type KvFile struct {
+type Impl struct {
 	path string
 }
 
-var _ kv.KV = (*KvFile)(nil)
-
-func (k *KvFile) key2FileName(key []byte) string {
+func (k *Impl) key2FileName(key []byte) string {
 	return filepath.Join(k.path, "."+hex.EncodeToString(key)+".data")
 }
 
-func (k *KvFile) Get(ctx context.Context, key []byte) ([]byte, error) {
+func (k *Impl) Get(ctx context.Context, key []byte) ([]byte, error) {
 	file, err := os.ReadFile(k.key2FileName(key))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -29,7 +27,7 @@ func (k *KvFile) Get(ctx context.Context, key []byte) ([]byte, error) {
 	return file, nil
 }
 
-func (k *KvFile) Put(ctx context.Context, key, value []byte) (err error) {
+func (k *Impl) Put(ctx context.Context, key, value []byte) (err error) {
 	temp, err := os.CreateTemp(k.path, "put-")
 	if err != nil {
 		return err
@@ -50,6 +48,6 @@ func (k *KvFile) Put(ctx context.Context, key, value []byte) (err error) {
 	return nil
 }
 
-func Open(path string) (*KvFile, error) {
-	return &KvFile{path: path}, nil
+func New(path string) kv.IF {
+	return &Impl{path: path}
 }

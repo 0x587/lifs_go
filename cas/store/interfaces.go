@@ -6,7 +6,7 @@ import (
 	"lifs_go/cas/chunks"
 )
 
-type Store interface {
+type IF interface {
 	Get(ctx context.Context, key cas.Key, type_ string, level uint8) (*chunks.Chunk, error)
 	Add(ctx context.Context, chunk *chunks.Chunk) (key cas.Key, err error)
 }

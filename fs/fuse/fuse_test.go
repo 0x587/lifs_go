@@ -1,12 +1,10 @@
-package fs_test
+package fuse_test
 
 import (
 	"bytes"
-	fs2 "github.com/hanwen/go-fuse/v2/fs"
-	"github.com/hanwen/go-fuse/v2/fuse"
 	"io"
 	"lifs_go/cas/store/mem"
-	"lifs_go/fs"
+	"lifs_go/fs/fuse"
 	"os"
 	"path"
 	"testing"
@@ -14,21 +12,14 @@ import (
 
 func MountInTemp(t *testing.T) (tmp string, cf func()) {
 	tmp, _ = os.MkdirTemp(os.TempDir(), "test-")
-	v := fs.New(&mem.Mem{})
-	opts := fs2.Options{MountOptions: fuse.MountOptions{Debug: false}}
-	c := make(chan *fuse.Server, 1)
-	go func() {
-		server, err := fs2.Mount(tmp, v, &opts)
-		if err != nil {
-			t.Fatalf("mount err: %v", err)
-		}
-		c <- server
-		server.Wait()
-	}()
-	server := <-c
+	v := fuse.New(mem.New())
+	unmountFunc, err := v.Mount(tmp)
+	if err != nil {
+		t.Fatalf("mount err: %v", err)
+	}
 	cf = func() {
 		_ = os.RemoveAll(tmp)
-		_ = server.Unmount()
+		unmountFunc()
 	}
 	return
 }

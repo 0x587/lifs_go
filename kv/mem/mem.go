@@ -1,17 +1,15 @@
-package kvmem
+package mem
 
 import (
 	"context"
 	"lifs_go/kv"
 )
 
-type KvMem struct {
+type Impl struct {
 	data map[string][]byte
 }
 
-var _ kv.KV = (*KvMem)(nil)
-
-func (m *KvMem) Get(ctx context.Context, key []byte) ([]byte, error) {
+func (m *Impl) Get(ctx context.Context, key []byte) ([]byte, error) {
 	v, found := m.data[string(key)]
 	if !found {
 		return nil, kv.NotFoundError{key}
@@ -19,7 +17,7 @@ func (m *KvMem) Get(ctx context.Context, key []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (m *KvMem) Put(ctx context.Context, key, value []byte) error {
+func (m *Impl) Put(ctx context.Context, key, value []byte) error {
 	if m.data == nil {
 		m.data = make(map[string][]byte)
 	}
@@ -27,6 +25,6 @@ func (m *KvMem) Put(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-func NewKvMem() *KvMem {
-	return &KvMem{}
+func New() kv.IF {
+	return &Impl{}
 }
